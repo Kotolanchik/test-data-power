@@ -1,0 +1,79 @@
+CREATE TABLE IF NOT EXISTS log_batch (
+    batch_id TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    status TEXT NOT NULL CHECK(status IN ('running', 'success', 'failed'))
+);
+
+CREATE TABLE IF NOT EXISTS log_session (
+    session_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL REFERENCES log_batch(batch_id),
+    description TEXT NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    status TEXT NOT NULL CHECK(status IN ('running', 'success', 'failed'))
+);
+
+-- ODS слой с указанием источника (файл + сессия)
+CREATE TABLE IF NOT EXISTS ods_ozon_orders (
+    order_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    date TIMESTAMP NOT NULL,
+    amount REAL NOT NULL,
+    customer_id TEXT NOT NULL,
+    customer_region TEXT NOT NULL,
+    source_session_id TEXT NOT NULL REFERENCES log_session(session_id),
+    source_file_path TEXT NOT NULL,
+    loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed BOOLEAN DEFAULT 0
+);
+
+-- DDS
+CREATE TABLE IF NOT EXISTS dds_regions (
+    region_key INTEGER PRIMARY KEY AUTOINCREMENT,
+    region_name TEXT NOT NULL,
+    source_batch_id TEXT NOT NULL REFERENCES log_batch(batch_id),
+    start_date TIMESTAMP NOT NULL,
+    end_date TIMESTAMP,
+    is_current BOOLEAN DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS dds_customers (
+    customer_key INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id TEXT NOT NULL,
+    region_key INTEGER NOT NULL REFERENCES dds_regions(region_key),
+    source_batch_id TEXT NOT NULL REFERENCES log_batch(batch_id),
+    start_date TIMESTAMP NOT NULL,
+    end_date TIMESTAMP,
+    is_current BOOLEAN DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS fct_orders (
+    order_key INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id TEXT NOT NULL,
+    customer_key INTEGER NOT NULL REFERENCES dds_customers(customer_key),
+    status TEXT NOT NULL,
+    date TIMESTAMP NOT NULL,
+    amount REAL NOT NULL,
+    source_batch_id TEXT NOT NULL REFERENCES log_batch(batch_id),
+    loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS log_job (
+    job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    description TEXT NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    status TEXT NOT NULL CHECK(status IN ('running', 'success', 'failed', 'partial_success')),
+    rows_processed INTEGER,
+    rows_inserted INTEGER,
+    FOREIGN KEY (session_id) REFERENCES log_session(session_id)
+);
+
+-- Индексы
+CREATE INDEX IF NOT EXISTS idx_ods_processed ON ods_ozon_orders(processed);
+CREATE INDEX IF NOT EXISTS idx_regions_current ON dds_regions(is_current);
+CREATE INDEX IF NOT EXISTS idx_customers_current ON dds_customers(is_current);
+CREATE INDEX IF NOT EXISTS idx_regions_name ON dds_regions(region_name);
